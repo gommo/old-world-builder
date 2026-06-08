@@ -12,8 +12,8 @@ import { NumberInput } from "../../components/number-input";
 import { getGameSystems } from "../../utils/game-systems";
 import { getRandomId } from "../../utils/id";
 import { useLanguage } from "../../utils/useLanguage";
-import { setLists } from "../../state/lists";
-import { rankAtTop } from "../../utils/list-ordering";
+import { addAtTopOp } from "../../utils/owr-list";
+import { useListCommit } from "../../utils/owr-list-commit";
 import { updateSetting } from "../../state/settings";
 import { RulesIndex, RuleWithIcon } from "../../components/rules-index";
 
@@ -25,6 +25,7 @@ export const NewList = ({ isMobile }) => {
   const MainComponent = isMobile ? Main : Fragment;
   const location = useLocation();
   const dispatch = useDispatch();
+  const commit = useListCommit();
   const intl = useIntl();
   const { language } = useLanguage();
   const gameSystems = getGameSystems();
@@ -100,15 +101,11 @@ export const NewList = ({ isMobile }) => {
       url: armyData?.url,
       armyComposition,
       compositionRule,
-      rank: rankAtTop(lists),
-      folder: null,
     };
-    const newLists = [newList, ...lists];
     const newSettings = { ...settings, lastChanged: new Date().toString() };
 
-    localStorage.setItem("owb.lists", JSON.stringify(newLists));
+    commit(addAtTopOp(newList));
     localStorage.setItem("owb.settings", JSON.stringify(newSettings));
-    dispatch(setLists(newLists));
     dispatch(updateSetting({ lastChanged: newSettings.lastChanged }));
 
     setRedirect(newId);

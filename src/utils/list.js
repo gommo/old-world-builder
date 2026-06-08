@@ -1,22 +1,31 @@
-// Merges `updatedList` into the existing localStorage entry rather than
-// replacing it — partial updates (e.g. folder toggle passing only id/open)
-// would otherwise wipe rank/folder/units.
-export const updateLocalList = (updatedList) => {
-  const localLists = JSON.parse(localStorage.getItem("owb.lists"));
-  if (!localLists || !updatedList) return;
+export { updateLocalList, removeFromLocalList } from "./owr-list";
 
-  const updatedLists = localLists.map((list) =>
-    list.id === updatedList.id ? { ...list, ...updatedList } : list,
-  );
+export const updateListsFolder = (lists) => {
+  const folderIndexes = {};
+  let latestFolderIndex = null;
 
-  try {
-    localStorage.setItem("owb.lists", JSON.stringify(updatedLists));
-  } catch (error) {}
-};
+  lists.forEach((folder, index) => {
+    if (folder.type === "folder") {
+      folderIndexes[index] = folder.id;
+    }
+  });
 
-export const removeFromLocalList = (listId) => {
-  const localLists = JSON.parse(localStorage.getItem("owb.lists"));
-  const updatedLists = localLists.filter((list) => list.id !== listId);
+  return lists.map((list, index) => {
+    if (folderIndexes[index]) {
+      latestFolderIndex = index;
+    }
 
-  localStorage.setItem("owb.lists", JSON.stringify(updatedLists));
+    if (list.type === "folder") {
+      return list;
+    }
+
+    if (list.folder !== undefined) {
+      return list;
+    }
+
+    const folder =
+      latestFolderIndex !== null ? folderIndexes[latestFolderIndex] : null;
+
+    return { ...list, folder };
+  });
 };

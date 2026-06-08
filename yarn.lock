@@ -3161,6 +3161,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fractional-indexing@npm:^3.2.0":
+  version: 3.2.0
+  resolution: "fractional-indexing@npm:3.2.0"
+  checksum: 10c0/d4d477c2ba369346ef0f03a4776bd78a3426e2778c23f8fd9dd3f51f9a851280bfc412c9bd970de55f1d21b831899f4c7f75f7fb72ae7f92b189eee962564005
+  languageName: node
+  linkType: hard
+
 "fs-extra@npm:^11.1.1":
   version: 11.3.0
   resolution: "fs-extra@npm:11.3.0"
@@ -4971,6 +4978,7 @@ __metadata:
     dropbox: "npm:^10.34.0"
     eslint: "npm:^10.0.2"
     eslint-plugin-react: "npm:^7.37.5"
+    fractional-indexing: "npm:^3.2.0"
     gh-pages: "npm:^6.1.1"
     globals: "npm:^17.4.0"
     prettier: "npm:^2.4.0"

@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from "react";
 import { useParams, useLocation, Redirect } from "react-router-dom";
-import { useSelector, useDispatch } from "react-redux";
+import { useSelector } from "react-redux";
 import { FormattedMessage, useIntl } from "react-intl";
 import { Helmet } from "react-helmet-async";
 
@@ -8,8 +8,9 @@ import { Button } from "../../components/button";
 import { Header, Main } from "../../components/page";
 import { NumberInput } from "../../components/number-input";
 import { getRandomId } from "../../utils/id";
-import { setLists } from "../../state/lists";
 import { rankAfter } from "../../utils/list-ordering";
+import { addListOp } from "../../utils/owr-list";
+import { useListCommit } from "../../utils/owr-list-commit";
 
 import "./DuplicateList.css";
 
@@ -18,12 +19,11 @@ export const DuplicateList = ({ isMobile }) => {
   const intl = useIntl();
   const MainComponent = isMobile ? Main : Fragment;
   const { listId } = useParams();
-  const dispatch = useDispatch();
+  const commit = useListCommit();
   const [name, setName] = useState("");
   const [points, setPoints] = useState(2000);
   const [description, setDescription] = useState("");
   const [redirect, setRedirect] = useState(null);
-  const lists = useSelector((state) => state.lists);
   const list = useSelector((state) =>
     state.lists.find(({ id }) => listId === id),
   );
@@ -40,20 +40,22 @@ export const DuplicateList = ({ isMobile }) => {
   const handleSubmit = (event) => {
     event.preventDefault();
     const newId = getRandomId();
-    const newLists = [
-      ...lists,
-      {
+    commit((storedLists) => {
+      const source = storedLists.find((l) => l.id === listId);
+      const duplicate = {
         ...list,
         name,
         points,
         description,
         id: newId,
-        rank: rankAfter(lists, list),
-      },
-    ];
-
-    localStorage.setItem("owb.lists", JSON.stringify(newLists));
-    dispatch(setLists(newLists));
+        folder: source?.folder ?? null,
+        rank: rankAfter(
+          storedLists.filter((l) => !l._deleted),
+          source,
+        ),
+      };
+      return addListOp(duplicate)(storedLists);
+    });
 
     setRedirect(newId);
   };
