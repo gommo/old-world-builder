@@ -34,6 +34,7 @@ export const OrderableList = ({
   onDragUpdate,
   onDragEnd,
   intoFolder,
+  disabled,
 }) => {
   const handleDragEnd = (result) => {
     // Always fire a cleanup callback so callers can reset transient drag
@@ -66,7 +67,7 @@ export const OrderableList = ({
                     key={child.key}
                     draggableId={child.key}
                     index={index}
-                    isDragDisabled={!!child.props?.dragDisabled}
+                    isDragDisabled={disabled || !!child.props?.dragDisabled}
                   >
                     {(provided, snapshot) => {
                       // Clone style — rbd's object is frozen.

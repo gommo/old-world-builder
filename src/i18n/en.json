@@ -37,6 +37,7 @@
   "app.points": "pts",
   "app.free": "free",
   "home.empty": "Create your first list.",
+  "home.reorderDisabledSorted": "Switch sorting to Manual to reorder your lists",
   "home.newList": "New list",
   "home.import": "Import list",
   "home.sponsored": "Partnerships",

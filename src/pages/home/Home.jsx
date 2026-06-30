@@ -285,6 +285,17 @@ export const Home = ({ isMobile }) => {
   };
   const folders = lists.filter((list) => list.type === "folder");
   const listsWithoutFolders = lists.filter((list) => list.type !== "folder");
+  // Drag-and-drop only makes sense in manual order. Under a Name/Faction sort
+  // the comparator immediately overrides any dragged rank, so dragging looks
+  // broken — disable it until the user switches back to Manual.
+  const sortActive =
+    !!settings.listSorting && settings.listSorting !== "manual";
+  const reorderHint = sortActive
+    ? intl.formatMessage({
+        id: "home.reorderDisabledSorted",
+        defaultMessage: "Switch sorting to Manual to reorder your lists",
+      })
+    : undefined;
   const moreButtonsFolder = [
     {
       name: intl.formatMessage({
@@ -692,6 +703,7 @@ export const Home = ({ isMobile }) => {
           onDragStart={handleDragStart}
           onDragUpdate={handleDragUpdate}
           intoFolder={dragIntoFolder}
+          disabled={sortActive}
         >
           {listsWithPhantoms.map(
             ({
@@ -720,6 +732,7 @@ export const Home = ({ isMobile }) => {
               ) : type === "folder" ? (
                 <ListItem
                   key={id}
+                  title={reorderHint}
                   to="#"
                   className={classNames(
                     "home__folder",
@@ -806,6 +819,7 @@ export const Home = ({ isMobile }) => {
               ) : (
                 <ListItem
                   key={id}
+                  title={reorderHint}
                   to={`/editor/${id}`}
                   active={location.pathname.includes(id)}
                   onClick={resetState}
