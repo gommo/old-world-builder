@@ -185,12 +185,19 @@ export const owrSyncLists = async ({ dispatch }) => {
       JSON.stringify({ ...settings, lastSynced: settings.lastChanged }),
     );
     hasPendingChanges = false;
-  } catch {
-    dispatch(
-      updateLogin({ isSyncing: false, loggedIn: false, loginLoading: false }),
-    );
-    localStorage.removeItem("owb.owrAccessToken");
-    localStorage.removeItem("owb.owrRefreshToken");
+  } catch (error) {
+    // Only a confirmed auth failure (token refresh exhausted) logs the user out
+    // and drops tokens. Network/5xx/parse failures are transient — keep the
+    // session and surface syncError so auto-sync can retry.
+    if (error?.isAuthError) {
+      dispatch(
+        updateLogin({ isSyncing: false, loggedIn: false, loginLoading: false }),
+      );
+      localStorage.removeItem("owb.owrAccessToken");
+      localStorage.removeItem("owb.owrRefreshToken");
+    } else {
+      dispatch(updateLogin({ isSyncing: false, syncError: true }));
+    }
   } finally {
     await ensureMinAnimation(startTime);
     isSyncing = false;
@@ -209,7 +216,16 @@ const runSyncRoundTrip = async () => {
     method: "POST",
     body: JSON.stringify({ lists: dirty, known }),
   });
-  if (!res || !res.ok) throw new Error("Push failed");
+  // owrFetch returns null only after a 401 whose token refresh also failed —
+  // an unrecoverable auth failure. A non-ok response (5xx, etc.), a network
+  // throw, or a parse error are recoverable and must NOT cost the user their
+  // session (see owrSyncLists).
+  if (!res) {
+    const authError = new Error("Auth failed");
+    authError.isAuthError = true;
+    throw authError;
+  }
+  if (!res.ok) throw new Error(`Sync failed: ${res.status}`);
 
   const data = await res.json();
   const currentLocal = JSON.parse(getItem("owb.lists")) || [];
@@ -467,14 +483,21 @@ const ensureMinAnimation = async (startTime) => {
 };
 
 /**
- * Clean up soft-deleted lists older than 7 days.
+ * Clean up soft-deleted lists. An ACKED tombstone (no longer dirty) is dropped
+ * once it's older than the 7-day retention window. An UNACKED tombstone (id
+ * still in the dirty set — e.g. a delete made offline) is kept regardless of
+ * age: purging it before the server has seen the delete would let the next pull
+ * resurrect the list.
  */
 export const cleanupDeletedLists = () => {
   const lists = JSON.parse(getItem("owb.lists")) || [];
   const now = Date.now();
+  const dirty = getDirtyIds();
 
   const cleaned = lists.filter((list) => {
-    if (!list._deleted) return true;
+    if (!list._deleted) return true; // Keep non-deleted
+    if (dirty.has(list.id)) return true; // Unacked delete — keep until server confirms
+
     const deletedAt = list.updated_at ? new Date(list.updated_at).getTime() : 0;
     return now - deletedAt < SOFT_DELETE_RETENTION_MS;
   });

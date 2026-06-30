@@ -1,4 +1,10 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
+
+const { owrFetchMock } = vi.hoisted(() => ({ owrFetchMock: vi.fn() }));
+vi.mock("./owr-fetch", () => ({
+  owrFetch: owrFetchMock,
+  refreshAccessToken: vi.fn(),
+}));
 
 const storage = {};
 const localStorageMock = {
@@ -19,7 +25,9 @@ beforeEach(() => {
   localStorageMock.clear();
 });
 
-const { __test__, markDirty } = await import("./owr-sync");
+const { __test__, markDirty, cleanupDeletedLists, owrSyncLists } = await import(
+  "./owr-sync"
+);
 const { mergeLists, applyDelta, applySyncResponse, reparentOrphans, splitDirtyLists, getDirtyIds } = __test__;
 
 describe("mergeLists", () => {
@@ -369,5 +377,112 @@ describe("dirty id tracking", () => {
     localStorage.setItem("owb.lists", JSON.stringify([{ id: "a" }]));
     localStorage.setItem("dirtyIds", JSON.stringify({ a: true }));
     expect(getDirtyIds()).toEqual(new Set(["a"]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupDeletedLists (offline-delete resurrection guard)
+// ---------------------------------------------------------------------------
+describe("cleanupDeletedLists", () => {
+  const ancient = "2020-01-01T00:00:00.000Z"; // well past the 7-day window
+  const idsIn = () =>
+    JSON.parse(localStorage.getItem("owb.lists"))
+      .map((l) => l.id)
+      .sort();
+
+  test("purges an ACKED tombstone older than the retention window", () => {
+    localStorage.setItem("dirtyIds", JSON.stringify([])); // nothing pending = server confirmed
+    localStorage.setItem(
+      "owb.lists",
+      JSON.stringify([
+        { id: "live", updated_at: ancient },
+        { id: "gone", _deleted: true, updated_at: ancient },
+      ]),
+    );
+    cleanupDeletedLists();
+    expect(idsIn()).toEqual(["live"]);
+  });
+
+  test("keeps an UNACKED tombstone past the window — the resurrection-bug guard", () => {
+    // Delete made offline: id still dirty, tombstone aged out the window. It
+    // must survive so the delete still reaches the server; otherwise the next
+    // pull resurrects the list.
+    localStorage.setItem("dirtyIds", JSON.stringify(["gone"]));
+    localStorage.setItem(
+      "owb.lists",
+      JSON.stringify([
+        { id: "live", updated_at: ancient },
+        { id: "gone", _deleted: true, updated_at: ancient },
+      ]),
+    );
+    cleanupDeletedLists();
+    expect(idsIn()).toEqual(["gone", "live"]);
+  });
+
+  test("keeps a fresh (within-window) acked tombstone", () => {
+    localStorage.setItem("dirtyIds", JSON.stringify([]));
+    localStorage.setItem(
+      "owb.lists",
+      JSON.stringify([
+        { id: "gone", _deleted: true, updated_at: new Date().toISOString() },
+      ]),
+    );
+    cleanupDeletedLists();
+    expect(idsIn()).toEqual(["gone"]);
+  });
+
+  test("never purges non-deleted lists, dirty or not", () => {
+    localStorage.setItem("dirtyIds", JSON.stringify([]));
+    localStorage.setItem(
+      "owb.lists",
+      JSON.stringify([
+        { id: "a", updated_at: ancient },
+        { id: "b", updated_at: ancient },
+      ]),
+    );
+    cleanupDeletedLists();
+    expect(idsIn()).toEqual(["a", "b"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// owrSyncLists — only a confirmed auth failure should drop tokens / log out
+// ---------------------------------------------------------------------------
+describe("owrSyncLists failure handling", () => {
+  beforeEach(() => {
+    owrFetchMock.mockReset();
+    localStorage.setItem("owb.owrAccessToken", "tok");
+    localStorage.setItem("owb.owrRefreshToken", "ref");
+  });
+
+  const hasTokens = () =>
+    localStorage.getItem("owb.owrAccessToken") === "tok" &&
+    localStorage.getItem("owb.owrRefreshToken") === "ref";
+  const dispatchedWith = (dispatch, pred) =>
+    dispatch.mock.calls.some(([action]) => pred(action?.payload || {}));
+
+  test("auth failure (owrFetch null) logs out and drops tokens", async () => {
+    owrFetchMock.mockResolvedValue(null); // 401 + refresh exhausted
+    const dispatch = vi.fn();
+    await owrSyncLists({ dispatch });
+    expect(hasTokens()).toBe(false);
+    expect(dispatchedWith(dispatch, (p) => p.loggedIn === false)).toBe(true);
+  });
+
+  test("server 5xx keeps the session and surfaces syncError", async () => {
+    owrFetchMock.mockResolvedValue({ ok: false, status: 500 });
+    const dispatch = vi.fn();
+    await owrSyncLists({ dispatch });
+    expect(hasTokens()).toBe(true);
+    expect(dispatchedWith(dispatch, (p) => p.syncError === true)).toBe(true);
+    expect(dispatchedWith(dispatch, (p) => p.loggedIn === false)).toBe(false);
+  });
+
+  test("network failure (owrFetch throws) keeps tokens", async () => {
+    owrFetchMock.mockRejectedValue(new Error("network down"));
+    const dispatch = vi.fn();
+    await owrSyncLists({ dispatch });
+    expect(hasTokens()).toBe(true);
+    expect(dispatchedWith(dispatch, (p) => p.loggedIn === false)).toBe(false);
   });
 });
