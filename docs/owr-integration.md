@@ -42,18 +42,18 @@ can work differently — that's fine.
 ### Better sync engine (from tributech fork)
 - Per-list `updated_at` timestamps — only sync changed lists
 - Soft deletes — track deleted lists for 7-30 days to prevent resurrection
-- Lexorank ordering — string-based ordering for drag-and-drop that survives
+- Order-key ordering — string-based ordering for drag-and-drop that survives
   partial syncs and filtered views
 - `folder` field on lists
 - `pinned_at` for pinning lists to top of folder
 
 ### Key design decisions
-- Extra properties (lexorank, updated_at, folder, pinned_at) in list JSON are fine
+- Extra properties (rank, updated_at, folder, pinned_at) in list JSON are fine
   to add — Dropbox sync will simply ignore them
 - Conflict resolution: same "use local" / "use remote" dialog as Dropbox
 - OWR Pro could gate auto-sync; free users still get manual sync or submit-only
 - Server-side: OWR stores lists in a JSON column (not flat file), so ordering
-  must be explicit (hence lexorank)
+  must be explicit (hence order keys)
 
 ### Naive sync vs soft-delete sync
 The Dropbox sync pushes the entire list array. This has a known "zombie list" problem:

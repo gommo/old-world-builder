@@ -39,10 +39,22 @@ import fantasyweltDe from "../../assets/fantasywelt_de.jpg";
 import fantasyweltEn from "../../assets/fantasywelt_en.jpg";
 import mwgForge from "../../assets/mwg-forge.gif";
 import { useLanguage } from "../../utils/useLanguage";
-import { updateLocalList } from "../../utils/list";
-import { sortByRank, ensureRanks, reorderList, reorderFolder, dropFolderFor } from "../../utils/list-ordering";
-import { generateRank } from "../../utils/lexorank";
-import { setLists, toggleFolder, updateList } from "../../state/lists";
+import {
+  updateLocalList,
+  addAtTopOp,
+  patchListOp,
+  deleteFolderOp,
+} from "../../utils/owr-list";
+import { useListCommit } from "../../utils/owr-list-commit";
+import {
+  sortByRank,
+  ensureRanks,
+  reorderList,
+  reorderFolder,
+  dropFolderFor,
+} from "../../utils/list-ordering";
+import { getItem, setItem } from "../../utils/storage";
+import { toggleFolder, updateList } from "../../state/lists";
 import { updateSetting } from "../../state/settings";
 import { getRandomId } from "../../utils/id";
 
@@ -76,22 +88,25 @@ export const Home = ({ isMobile }) => {
   const MainComponent = isMobile ? Main : Fragment;
   const settings = useSelector((state) => state.settings);
   const dispatch = useDispatch();
+  const commit = useListCommit();
   const rawLists = useSelector((state) => state.lists);
-
-  const { lists: rankedLists, needsUpdate } = useMemo(
-    () => ensureRanks(rawLists),
-    [rawLists],
-  );
 
   useEffect(() => {
     if (!rawLists || rawLists.length === 0) return;
+    const stored = JSON.parse(getItem("owb.lists")) || [];
+    const live = stored.filter((l) => !l._deleted);
+    const tombstones = stored.filter((l) => l._deleted);
+    const { lists: withRanks, needsUpdate } = ensureRanks(live);
     if (needsUpdate) {
-      localStorage.setItem("owb.lists", JSON.stringify(rankedLists));
-      dispatch(setLists(rankedLists));
+      commit(() => [...withRanks, ...tombstones]);
     }
-  }, [rawLists, needsUpdate, rankedLists, dispatch]);
+  }, [rawLists, commit]);
 
-  const sortedLists = useMemo(() => sortByRank(rankedLists), [rankedLists]);
+  const rankedLists = useMemo(() => ensureRanks(rawLists).lists, [rawLists]);
+  const sortedLists = useMemo(
+    () => sortByRank(rankedLists),
+    [rankedLists],
+  );
   let lists = sortedLists;
 
   const folderIndex = useMemo(() => {
@@ -226,7 +241,12 @@ export const Home = ({ isMobile }) => {
     dispatch(setItems(null));
   };
   const updateLocalSettings = (newSettings) => {
-    localStorage.setItem("owb.settings", JSON.stringify(newSettings));
+    setItem("owb.settings", JSON.stringify(newSettings));
+  };
+  const touchLastChanged = () => {
+    const lastChanged = new Date().toString();
+    dispatch(updateSetting({ lastChanged }));
+    localStorage.setItem("owb.settings", JSON.stringify({ ...settings, lastChanged }));
   };
   const handleListMoved = ({ sourceIndex, destinationIndex }) => {
     setListsInFolder([]);
@@ -242,21 +262,26 @@ export const Home = ({ isMobile }) => {
       return;
     }
 
-    const newLists =
-      draggedItem.type === "folder"
-        ? reorderFolder(listsWithPhantoms, sourceIndex, destinationIndex).filter(
-            (l) => !l._phantom,
-          )
-        : reorderList(listsWithPhantoms, sourceIndex, destinationIndex).filter(
-            (l) => !l._phantom,
-          );
-
-    localStorage.setItem("owb.lists", JSON.stringify(newLists));
-    dispatch(setLists(newLists));
-
-    const newSettings = { ...settings, lastChanged: new Date().toString() };
-    dispatch(updateSetting({ lastChanged: newSettings.lastChanged }));
-    localStorage.setItem("owb.settings", JSON.stringify(newSettings));
+    if (draggedItem.type === "folder") {
+      const reordered = reorderFolder(
+        listsWithPhantoms,
+        sourceIndex,
+        destinationIndex,
+      );
+      const moved = reordered.find((l) => l.id === draggedItem.id);
+      commit(patchListOp(draggedItem.id, { rank: moved.rank }));
+    } else {
+      const reordered = reorderList(
+        listsWithPhantoms,
+        sourceIndex,
+        destinationIndex,
+      );
+      const moved = reordered.find((l) => l.id === draggedItem.id);
+      commit(
+        patchListOp(draggedItem.id, { rank: moved.rank, folder: moved.folder }),
+      );
+    }
+    touchLastChanged();
   };
   const folders = lists.filter((list) => list.type === "folder");
   const listsWithoutFolders = lists.filter((list) => list.type !== "folder");
@@ -368,26 +393,15 @@ export const Home = ({ isMobile }) => {
     setFolderName("");
   };
   const handleDeleteConfirm = () => {
-    let newLists = lists.filter((list) => list.id !== activeMenu);
-
-    if (activeDeleteOption === "delete") {
-      newLists = newLists.filter(
-        (list) => list.folder !== activeMenu || !list.folder,
-      );
-    } else {
-      newLists = newLists.map((list) =>
-        list.folder === activeMenu ? { ...list, folder: null } : list,
-      );
-    }
-
+    const folderId = activeMenu;
     setDialogOpen(null);
     setActiveMenu(null);
-    dispatch(setLists(newLists));
-    localStorage.setItem("owb.lists", JSON.stringify(newLists));
-
-    const newSettings = { ...settings, lastChanged: new Date().toString() };
-    dispatch(updateSetting({ lastChanged: newSettings.lastChanged }));
-    localStorage.setItem("owb.settings", JSON.stringify(newSettings));
+    commit(
+      deleteFolderOp(folderId, {
+        deleteContents: activeDeleteOption === "delete",
+      }),
+    );
+    touchLastChanged();
   };
   const handleEditConfirm = () => {
     const list = lists.find((list) => list.id === activeMenu);
@@ -400,30 +414,18 @@ export const Home = ({ isMobile }) => {
       name: folderName,
     });
 
-    const newSettings = { ...settings, lastChanged: new Date().toString() };
-    dispatch(updateSetting({ lastChanged: newSettings.lastChanged }));
-    localStorage.setItem("owb.settings", JSON.stringify(newSettings));
+    touchLastChanged();
   };
   const handleNewConfirm = () => {
-    const firstRank = lists.length > 0 ? lists[0].rank : null;
-    const newLists = [
-      {
+    commit(
+      addAtTopOp({
         id: `folder-${getRandomId()}`,
         name: folderName || intl.formatMessage({ id: "home.newFolder" }),
         type: "folder",
         open: true,
-        folder: null,
-        rank: generateRank(null, firstRank),
-      },
-      ...lists,
-    ];
-
-    localStorage.setItem("owb.lists", JSON.stringify(newLists));
-    dispatch(setLists(newLists));
-
-    const newSettings = { ...settings, lastChanged: new Date().toString() };
-    dispatch(updateSetting({ lastChanged: newSettings.lastChanged }));
-    localStorage.setItem("owb.settings", JSON.stringify(newSettings));
+      }),
+    );
+    touchLastChanged();
 
     setFolderName("");
     setDialogOpen(null);

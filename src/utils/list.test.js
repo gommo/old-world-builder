@@ -1,97 +1,104 @@
-import { describe, test, expect, beforeEach } from "vitest";
-import { updateLocalList, removeFromLocalList } from "./list";
+import { describe, test, expect } from "vitest";
+import { updateListsFolder } from "./list";
 
-// Mock localStorage
-const storage = {};
-const localStorageMock = {
-  getItem: (key) => storage[key] || null,
-  setItem: (key, value) => { storage[key] = value; },
-  removeItem: (key) => { delete storage[key]; },
-  clear: () => { Object.keys(storage).forEach((key) => delete storage[key]); },
-};
-Object.defineProperty(globalThis, "localStorage", { value: localStorageMock });
-
-beforeEach(() => {
-  localStorageMock.clear();
-});
-
-describe("updateLocalList", () => {
-  test("updates the matching list in localStorage", () => {
-    const lists = [
-      { id: "1", name: "First" },
-      { id: "2", name: "Second" },
-    ];
-    localStorage.setItem("owb.lists", JSON.stringify(lists));
-
-    updateLocalList({ id: "1", name: "Updated First" });
-
-    const result = JSON.parse(localStorage.getItem("owb.lists"));
-    expect(result[0].name).toBe("Updated First");
-    expect(result[1].name).toBe("Second");
+describe("updateListsFolder", () => {
+  const makeList = (id, name, folder = null) => ({
+    id,
+    name,
+    type: "list",
+    folder,
   });
 
-  test("merges partial updates and preserves other fields", () => {
-    const lists = [
-      {
-        id: "folder-1",
-        name: "My Folder",
-        type: "folder",
-        open: true,
-        rank: "h",
-        folder: null,
-      },
-    ];
-    localStorage.setItem("owb.lists", JSON.stringify(lists));
+  const makeFolder = (id, name) => ({
+    id,
+    name,
+    type: "folder",
+    folder: null,
+    open: true,
+  });
 
-    // Folder toggle only passes id/name/type/open
-    updateLocalList({ id: "folder-1", name: "My Folder", type: "folder", open: false });
+  describe("new folder at end of array", () => {
+    test("does not capture existing folder:null lists", () => {
+      const list1 = makeList("list-1", "List 1", null);
+      const list2 = makeList("list-2", "List 2", null);
+      const newFolder = makeFolder("folder-new", "New Folder");
 
-    const result = JSON.parse(localStorage.getItem("owb.lists"));
-    expect(result[0]).toEqual({
-      id: "folder-1",
-      name: "My Folder",
-      type: "folder",
-      open: false,
-      rank: "h",
-      folder: null,
+      // New folder appended at end
+      const input = [list1, list2, newFolder];
+      const result = updateListsFolder(input);
+
+      // Lists should remain at top level
+      expect(result[0].folder).toBeNull();
+      expect(result[1].folder).toBeNull();
+      // New folder should also be at top level
+      expect(result[2].folder).toBeNull();
+      expect(result[2].type).toBe("folder");
+    });
+
+    test("new folder at end doesn't affect existing folder structure", () => {
+      const folder1 = makeFolder("folder-1", "Folder 1");
+      const list1 = makeList("list-1", "List 1", null);
+      const list2 = makeList("list-2", "List 2", null);
+      const newFolder = makeFolder("folder-new", "New Folder");
+
+      // Existing folder, some lists, then new folder
+      const input = [folder1, list1, list2, newFolder];
+      const result = updateListsFolder(input);
+
+      // Folder 1 stays at top level
+      expect(result[0].folder).toBeNull();
+      expect(result[0].type).toBe("folder");
+
+      // Lists with explicit folder:null stay top-level (not reassigned by position)
+      expect(result[1].folder).toBeNull();
+      expect(result[2].folder).toBeNull();
+
+      // New folder should remain at top level
+      expect(result[3].folder).toBeNull();
+      expect(result[3].type).toBe("folder");
+    });
+
+    test("multiple folders at end maintain independence", () => {
+      const list1 = makeList("list-1", "List 1", null);
+      const folder1 = makeFolder("folder-1", "Folder 1");
+      const folder2 = makeFolder("folder-2", "Folder 2");
+
+      const input = [list1, folder1, folder2];
+      const result = updateListsFolder(input);
+
+      // Top-level list
+      expect(result[0].folder).toBeNull();
+      // Both folders at top level
+      expect(result[1].folder).toBeNull();
+      expect(result[2].folder).toBeNull();
     });
   });
-});
 
-describe("removeFromLocalList", () => {
-  test("removes the list from localStorage", () => {
-    const lists = [
-      { id: "1", name: "First" },
-      { id: "2", name: "Second" },
-    ];
-    localStorage.setItem("owb.lists", JSON.stringify(lists));
+  describe("new folder at beginning of array", () => {
+    test("respects explicit folder:null — does not capture top-level lists", () => {
+      const list1 = makeList("list-1", "List 1", null);
+      const list2 = makeList("list-2", "List 2", null);
+      const newFolder = makeFolder("folder-new", "New Folder");
 
-    removeFromLocalList("1");
+      const input = [newFolder, list1, list2];
+      const result = updateListsFolder(input);
 
-    const result = JSON.parse(localStorage.getItem("owb.lists"));
-    expect(result).toEqual([{ id: "2", name: "Second" }]);
+      // Lists with explicit folder:null should stay top-level
+      expect(result[1].folder).toBeNull();
+      expect(result[2].folder).toBeNull();
+    });
   });
 
-  test("does not modify other lists", () => {
-    const lists = [
-      { id: "1", name: "First" },
-      { id: "2", name: "Second" },
-    ];
-    localStorage.setItem("owb.lists", JSON.stringify(lists));
+  describe("legacy items without folder property", () => {
+    test("assigns folder from position for items with no folder property", () => {
+      const legacyList = { id: "legacy-1", name: "Legacy", type: "list" }; // no folder property
+      const folder = makeFolder("folder-1", "Folder 1");
 
-    removeFromLocalList("2");
+      const input = [folder, legacyList];
+      const result = updateListsFolder(input);
 
-    const result = JSON.parse(localStorage.getItem("owb.lists"));
-    expect(result).toEqual([{ id: "1", name: "First" }]);
-  });
-
-  test("is a no-op when the id is not present", () => {
-    const lists = [{ id: "1", name: "First" }];
-    localStorage.setItem("owb.lists", JSON.stringify(lists));
-
-    removeFromLocalList("nonexistent");
-
-    const result = JSON.parse(localStorage.getItem("owb.lists"));
-    expect(result).toEqual([{ id: "1", name: "First" }]);
+      // Legacy item (no folder property) should be assigned by position
+      expect(result[1].folder).toBe("folder-1");
+    });
   });
 });
